@@ -1,0 +1,7 @@
+{
+  "name": "Kinglab Bodegas 202",
+  "description": "Asistente de gestión de productos vinícolas y generación de imágenes publicitarias.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
