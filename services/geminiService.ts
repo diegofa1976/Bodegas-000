@@ -2,10 +2,9 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Wine, ImageType, FunnelState } from "../types";
 
-// Using the mandatory process.env.API_KEY directly in the named parameter object
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 export const generateVisualConcepts = async (wine: Wine, state: FunnelState): Promise<string[]> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
   const prompt = `
     Eres un Director Creativo experto en fotografía de vinos para Kinglab Bodegas 202.
     Analiza la siguiente información y genera 3 conceptos visuales distintos, creativos y profesionales en ESPAÑOL.
@@ -48,14 +47,14 @@ export const generateVisualConcepts = async (wine: Wine, state: FunnelState): Pr
       }
     });
 
-    const data = JSON.parse(response.text);
-    return data.concepts;
+    const data = JSON.parse(response.text || '{}');
+    return data.concepts || [];
   } catch (error) {
     console.error("Error generating concepts:", error);
     return [
-      "Una toma elegante resaltando la etiqueta con luz lateral suave.",
-      "Un ambiente cálido y sofisticado que invita a la degustación.",
-      "Composición minimalista centrada en la silueta de la botella."
+      "Una toma elegante resaltando la botella con luz lateral dramática y sombras suaves.",
+      "Un entorno orgánico y rústico que resalta la conexión con la tierra y el viñedo.",
+      "Composición minimalista de alta gama centrada en la silueta y reflejos del cristal."
     ];
   }
 };
@@ -66,6 +65,8 @@ export const generateFinalImage = async (
   ratio: string, 
   adjustment?: string
 ): Promise<string | null> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
   const base64Data = wine.image.split(',')[1];
   const mimeType = wine.image.split(';')[0].split(':')[1];
 

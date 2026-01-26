@@ -31,7 +31,7 @@ export enum ImageType {
   MOMENTO_SOCIAL = 'Momento social'
 }
 
-export type AspectRatio = '1:1' | '4:5' | '9:16' | '16:9';
+export type AspectRatio = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
 
 export interface FunnelState {
   type: ImageType | null;
@@ -42,4 +42,6 @@ export interface FunnelState {
   selectedConceptIndex: number | null;
   editingConceptIndex: number | null;
   imageHistory: string[];
+  isLoading: boolean;
+  error: string | null;
 }

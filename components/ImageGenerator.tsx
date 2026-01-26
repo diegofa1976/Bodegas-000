@@ -32,7 +32,8 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ wines, initialSelectedW
     }
   };
 
-  const ratios: AspectRatio[] = ['1:1', '4:5', '9:16', '16:9'];
+  // Fix: changed '4:5' to '3:4' to match AspectRatio type definition in types.ts (allowed values: '1:1' | '3:4' | '4:3' | '9:16' | '16:9')
+  const ratios: AspectRatio[] = ['1:1', '3:4', '9:16', '16:9'];
   const types = Object.values(ImageType);
 
   const labelClasses = "block text-sm font-semibold text-stone-700 mb-2";
