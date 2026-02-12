@@ -5,8 +5,10 @@ export interface Wine {
   description: string;
   image: string; // base64 string
   targetAudience: string;
-  priceLevel: string;
-  specialFeatures: string[];
+  priceLevel: string; // Internal, no longer in form
+  specialFeatures: string; // Changed from string[] to string for free text
+  analysisResult?: string;
+  useAnalysisInCreative?: boolean;
 }
 
 export interface GalleryImage {
@@ -38,6 +40,8 @@ export interface FunnelState {
   step: number;
   selections: Record<string, any>;
   contextText: string;
+  timeContext: string;
+  locationImage?: string;
   concepts: string[];
   selectedConceptIndex: number | null;
   editingConceptIndex: number | null;
