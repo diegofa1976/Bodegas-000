@@ -1,6 +1,7 @@
 {
   "name": "KingLab Bodegas",
   "description": "Asistente de gestión de productos vinícolas y generación de imágenes publicitarias.",
+  "appId": "94bbb638-8d73-496d-9e16-22e3d4a53341",
   "requestFramePermissions": [
     "camera"
   ]

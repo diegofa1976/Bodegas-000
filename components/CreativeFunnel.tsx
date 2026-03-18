@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Wine, ImageType, FunnelState, AspectRatio, GalleryImage } from '../types';
+import { Wine, ImageType, FunnelState, AspectRatio, GalleryImage, PaletteIntensity } from '../types';
+import { PAIRING_OPTIONS } from '../constants';
 import { generateVisualConcepts, generateFinalImage, reinterpretEditRequest } from '../services/geminiService';
 
 interface CreativeFunnelProps {
@@ -15,8 +16,17 @@ interface CreativeFunnelProps {
   };
 }
 
+const GENERAL_TIME_CATEGORIES = {
+  "Estaciones": ["Primavera", "Verano", "Otoño", "Invierno"]
+};
+
 const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSaveToGallery, initialData }) => {
-  const [selectedWine, setSelectedWine] = useState<Wine>(initialData?.wine || wines[0]);
+  const [selectedWine, setSelectedWine] = useState<Wine>(() => {
+    if (initialData?.wine) return initialData.wine;
+    if (wines && wines.length > 0) return wines[0];
+    // Fallback to avoid crash, though App.tsx should prevent this
+    return { id: 'temp', name: 'Vino', description: '', image: '', targetAudience: '', priceLevel: '', specialFeatures: '' };
+  });
   const locationFileRef = useRef<HTMLInputElement>(null);
   
   const [state, setState] = useState<FunnelState>({
@@ -30,6 +40,7 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
     selectedConceptIndex: initialData ? 0 : null,
     editingConceptIndex: null,
     imageHistory: (initialData?.isAdjustment && initialData.imageUrl) ? [initialData.imageUrl] : [],
+    paletteIntensity: 'Natural',
     isLoading: false,
     error: null
   });
@@ -40,6 +51,15 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [showMoreAtmosphere, setShowMoreAtmosphere] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
+  const [validationMessage, setValidationMessage] = useState<string | null>(null);
+
+  // Clear validation message after 2 seconds
+  useEffect(() => {
+    if (validationMessage) {
+      const timer = setTimeout(() => setValidationMessage(null), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [validationMessage]);
 
   const isPremium = useMemo(() => {
     const text = (selectedWine.description + selectedWine.specialFeatures + selectedWine.name).toLowerCase();
@@ -61,16 +81,49 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
   const seasonalSuggestions = useMemo(() => {
     const now = new Date();
     const month = now.getMonth();
+    const day = now.getDate();
     let suggestions: string[] = [];
+    
+    // Estación actual
     if (month === 11 || month <= 1) suggestions.push("Invierno");
     else if (month >= 2 && month <= 4) suggestions.push("Primavera");
     else if (month >= 5 && month <= 7) suggestions.push("Verano");
     else if (month >= 8 && month <= 10) suggestions.push("Otoño");
-    if (month === 0) suggestions.push("San Valentín", "Escena acogedora");
-    else if (month === 1) suggestions.push("San Valentín", "Luz de chimenea");
-    else if (month >= 5 && month <= 7) suggestions.push("Atardecer en terraza", "Picnic");
-    else if (month >= 8 && month <= 10) suggestions.push("Vendimia", "Luz dorada");
-    return Array.from(new Set(suggestions)).slice(0, 4);
+    
+    // Navidad: Dec 1 to Jan 6
+    if (month === 11 || (month === 0 && day <= 6)) {
+      suggestions.push("Navidad");
+    }
+    
+    // San Valentín: Feb 1 to Feb 14
+    if (month === 1 && day <= 14) {
+      suggestions.push("San Valentín");
+    }
+    
+    // Carnaval: Feb 1 to March 5
+    if (month === 1 || (month === 2 && day <= 5)) {
+      suggestions.push("Carnaval");
+    }
+    
+    // Semana de esquí: Jan 15 to March 15
+    if ((month === 0 && day >= 15) || month === 1 || (month === 2 && day <= 15)) {
+      suggestions.push("Semana de esquí");
+    }
+    
+    // Semana Santa: March 15 to April 15
+    if ((month === 2 && day >= 15) || (month === 3 && day <= 15)) {
+      suggestions.push("Semana Santa");
+    }
+    
+    if (month >= 5 && month <= 7) suggestions.push("Atardecer en terraza");
+    if (month >= 8 && month <= 10) suggestions.push("Vendimia");
+    
+    // Ensure we have at least 2-3 suggestions
+    if (suggestions.length < 2) {
+      suggestions.push("Atardecer dorado", "Celebración íntima");
+    }
+    
+    return Array.from(new Set(suggestions)).slice(0, 3);
   }, []);
 
   useEffect(() => {
@@ -80,11 +133,13 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
   }, []);
 
   const setType = (type: ImageType) => {
-    setState(prev => ({ ...prev, type, step: 2, selections: {} }));
+    setValidationMessage(null);
+    setState(prev => ({ ...prev, type }));
     setShowMoreActions(false);
   };
   
-  const handleSelection = (key: string, value: string) => {
+  const handleSelection = (key: string, value: any) => {
+    setValidationMessage(null);
     if (key === 'accion' && value === 'Más opciones') {
       setShowMoreActions(true);
       return;
@@ -93,11 +148,50 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
       setShowMoreAtmosphere(true);
       return;
     }
-    if (key === 'atmosfera') {
-       setState(prev => ({ ...prev, selections: { ...prev.selections, [key]: value } }));
-       return;
+    
+    if (key === 'maridaje_item') {
+      const currentItems = state.selections['maridaje_items'] || [];
+      const nextItems = currentItems.includes(value)
+        ? currentItems.filter((i: string) => i !== value)
+        : [...currentItems, value];
+      
+      setState(prev => ({
+        ...prev,
+        selections: {
+          ...prev.selections,
+          maridaje_items: nextItems
+        }
+      }));
+      return;
     }
-    setState(prev => ({ ...prev, selections: { ...prev.selections, [key]: value } }));
+
+    setState(prev => ({
+      ...prev,
+      selections: {
+        ...prev.selections,
+        [key]: value
+      }
+    }));
+  };
+
+  const handleTimeContextChange = (value: string) => {
+    setValidationMessage(null);
+    setState(prev => ({ ...prev, timeContext: value }));
+  };
+
+  const handleRatioChange = (r: AspectRatio) => {
+    setValidationMessage(null);
+    setRatio(r);
+  };
+
+  const handleContextTextChange = (value: string) => {
+    setValidationMessage(null);
+    setState(prev => ({ ...prev, contextText: value }));
+  };
+
+  const handleIntensityChange = (intensity: PaletteIntensity) => {
+    setValidationMessage(null);
+    setState(prev => ({ ...prev, paletteIntensity: intensity }));
   };
 
   const handleLocationImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -112,8 +206,9 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
   };
   
   const startConceptGeneration = async () => {
+    if (!validateStep()) return;
     setState(prev => ({ ...prev, isLoading: true, error: null }));
-    setLoadingMessage("Generando propuestas creativas...");
+    setLoadingMessage("Estamos generando tus propuestas creativas...");
     try {
       const concepts = await generateVisualConcepts(selectedWine, state);
       setState(prev => ({ 
@@ -131,14 +226,173 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
   };
 
   const shouldSkipAtmosphere = () => {
+    if (state.type === ImageType.PAISAJE_TERROIR) return true;
     if (state.type !== ImageType.BODEGON) return false;
     if (state.selections['limpieza'] === 'Muy minimal') return true;
     if (state.selections['fondo'] === 'Neutro') return true;
     return false;
   };
 
-  const nextStep = () => {
+  const validateStep = () => {
+    if (state.step === 1) {
+      if (!state.type) {
+        setValidationMessage("¡Casi! Elige el tipo de escena para que podamos crear algo especial para ti");
+        return false;
+      }
+    }
+
+    if (state.step === 2) {
+      const selections = state.selections;
+      const hasSavedPairings = selectedWine.suggestedPairings && selectedWine.suggestedPairings.length > 0;
+
+      if (state.type === ImageType.PAISAJE_TERROIR) {
+        if (!selections['entorno']) {
+          setValidationMessage("¿Dónde ocurre la magia? Elige un entorno para continuar");
+          return false;
+        }
+        if (!state.timeContext) {
+          setValidationMessage("¿En qué momento quieres situar tu vino? Elige una estación para continuar");
+          return false;
+        }
+        if (!selections['iluminacion_paisaje']) {
+          setValidationMessage("Elige la iluminación ideal para capturar la esencia del paisaje");
+          return false;
+        }
+        if (!selections['foco_paisaje']) {
+          setValidationMessage("Dinos qué quieres destacar en esta toma natural");
+          return false;
+        }
+      } else if (state.type === ImageType.EN_USO) {
+        if (!selections['mano']) {
+          setValidationMessage("Cuéntanos quién va a disfrutar el vino en esta escena");
+          return false;
+        }
+        if (selections['mano'] !== 'Mano sola' && !selections['rango_edad']) {
+          setValidationMessage("Dinos el rango de edad para que la escena sea perfecta");
+          return false;
+        }
+        if (!selections['valor_plano']) {
+          setValidationMessage("Elige el encuadre ideal para tu composición");
+          return false;
+        }
+        if (!selections['accion']) {
+          setValidationMessage("¿Qué está pasando en la escena? Elige una acción");
+          return false;
+        }
+        if (!selections['protagonismo']) {
+          setValidationMessage("Dinos cuánto protagonismo quieres que tenga la persona");
+          return false;
+        }
+        if (!selections['maridaje_toggle']) {
+          setValidationMessage("¿Acompañamos el vino con algo de comer? Elige una opción");
+          return false;
+        }
+        if (selections['maridaje_toggle'] === 'Con maridaje') {
+          if (!selections['maridaje_cat']) {
+            setValidationMessage("Elige una categoría de maridaje");
+            return false;
+          }
+          if (!selections['maridaje_sub']) {
+            setValidationMessage("Elige el tipo de maridaje");
+            return false;
+          }
+          if (!(selections['maridaje_items'] && selections['maridaje_items'].length > 0)) {
+            setValidationMessage("Elige al menos un plato específico para el maridaje");
+            return false;
+          }
+        }
+      } else if (state.type === ImageType.MOMENTO_SOCIAL) {
+        if (!selections['personas']) {
+          setValidationMessage("Cuéntanos quién va a disfrutar el vino en esta escena");
+          return false;
+        }
+        if (!selections['rango_edad']) {
+          setValidationMessage("Dinos el rango de edad para que la escena sea perfecta");
+          return false;
+        }
+        if (!selections['situacion']) {
+          setValidationMessage("Define el ambiente de este momento social");
+          return false;
+        }
+        if (!selections['foco']) {
+          setValidationMessage("Dinos qué quieres que sea lo más importante en la imagen");
+          return false;
+        }
+        if (!selections['maridaje_toggle']) {
+          setValidationMessage("¿Acompañamos el vino con algo de comer? Elige una opción");
+          return false;
+        }
+        if (selections['maridaje_toggle'] === 'Con maridaje') {
+          if (!selections['maridaje_cat']) {
+            setValidationMessage("Elige una categoría de maridaje");
+            return false;
+          }
+          if (!selections['maridaje_sub']) {
+            setValidationMessage("Elige el tipo de maridaje");
+            return false;
+          }
+          if (!(selections['maridaje_items'] && selections['maridaje_items'].length > 0)) {
+            setValidationMessage("Elige al menos un plato específico para el maridaje");
+            return false;
+          }
+        }
+      } else if (state.type === ImageType.BODEGON) {
+        if (!selections['superficie']) {
+          setValidationMessage("Elige una superficie elegante para presentar tu vino");
+          return false;
+        }
+        if (selections['superficie'] === 'Minimalista' && !selections['limpieza']) {
+          setValidationMessage("Dinos qué nivel de minimalismo prefieres para el bodegón");
+          return false;
+        }
+        
+        const isMinimal = selections['superficie'] === 'Minimalista' && selections['limpieza'] === 'Muy minimal';
+        
+        if (!isMinimal) {
+          if (!selections['apoyo']) {
+            setValidationMessage("Elige si quieres algún elemento de apoyo en la composición");
+            return false;
+          }
+        }
+        
+        if (!selections['fondo']) {
+          setValidationMessage("Dinos qué fondo prefieres para resaltar la botella");
+          return false;
+        }
+      }
+    }
+
     if (state.step === 3) {
+      if (!ratio) {
+        setValidationMessage("Solo falta elegir el formato y estaremos listos para crear tu imagen");
+        return false;
+      }
+    }
+
+    if (state.step === 4) {
+      if (!state.selections['donde']) {
+        setValidationMessage("¿Dónde ocurre la magia? Elige un entorno para continuar");
+        return false;
+      }
+      if (!state.timeContext) {
+        setValidationMessage("¿En qué momento quieres situar tu vino? Elige una estación para continuar");
+        return false;
+      }
+      if (!state.selections['atmosfera']) {
+        setValidationMessage("Elige una atmósfera para darle el toque final a la escena");
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const nextStep = () => {
+    if (!validateStep()) return;
+
+    if (state.step === 1) {
+      setState(prev => ({ ...prev, step: 2, selections: {} }));
+    } else if (state.step === 3) {
       if (shouldSkipAtmosphere()) {
         startConceptGeneration();
       } else {
@@ -171,6 +425,10 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
     try {
       let finalAdjustment = adjustment;
       
+      if (!selectedWine || !selectedWine.name) {
+        throw new Error("No hay un vino seleccionado válido.");
+      }
+
       // REINTERPRETATION LAYER for EDIT MODE feedback
       if (isEditMode && adjustment) {
         setLoadingMessage("Interpretando instrucciones...");
@@ -180,6 +438,11 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
       setLoadingMessage(isEditMode ? "Aplicando cambios..." : "Generando imagen en alta resolución");
       
       const conceptToUse = state.concepts[index] || (index === 0 ? initialData?.concept : '') || '';
+      
+      if (!conceptToUse && !isEditMode) {
+        throw new Error("No se ha definido un concepto visual.");
+      }
+
       const img = await generateFinalImage(selectedWine, String(conceptToUse), ratio, finalAdjustment, state.locationImage, baseImage);
       
       if (img) {
@@ -188,6 +451,8 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
           url: img,
           concept: String(conceptToUse),
           wineName: selectedWine.name,
+          wineId: selectedWine.id,
+          sceneType: state.type || 'Imagen',
           timestamp: Date.now()
         };
         setState(prev => ({ 
@@ -227,13 +492,46 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
     selectAndGenerate(index, adj);
   };
 
-  const handleDownload = (imgUrl: string) => {
-    const link = document.createElement('a');
-    link.href = imgUrl;
-    link.download = `kinglab_${selectedWine.name.toLowerCase().replace(/\s/g, '_')}_${Date.now()}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleDownload = async (imgUrl: string) => {
+    const wineName = selectedWine.name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    const sceneType = (state.type || 'imagen').toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    const timestamp = Date.now();
+    const fileName = `${wineName}-${sceneType}-${timestamp}.png`;
+
+    try {
+      // If it's already a base64 string, we can use it directly
+      if (imgUrl.startsWith('data:')) {
+        const link = document.createElement('a');
+        link.href = imgUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+
+      // If it's a URL (e.g. from Firebase Storage), fetch as blob to force filename
+      const response = await fetch(imgUrl);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error('Error downloading image:', error);
+      // Fallback
+      const link = document.createElement('a');
+      link.href = imgUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   };
 
   const btnSecondary = "py-4 rounded-xl border border-stone-300 bg-white text-stone-900 font-bold hover:border-black active:bg-stone-50 transition-all text-center px-4";
@@ -242,40 +540,101 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
   const getAspectClass = (r: AspectRatio) => {
     switch (r) {
       case '1:1': return 'aspect-square';
-      case '3:4': return 'aspect-[3/4]';
-      case '4:3': return 'aspect-[4/3]';
       case '9:16': return 'aspect-[9/16]';
       case '16:9': return 'aspect-[16/9]';
+      case '4:5': return 'aspect-[4/5]';
+      case '4:3 / A4': return 'aspect-[4/3]';
       default: return 'aspect-square';
     }
   };
 
+  const SCENE_DESCRIPTIONS: Record<string, string> = {
+    [ImageType.BODEGON]: "El producto como protagonista absoluto, sin personas",
+    [ImageType.EN_USO]: "Una persona sirve o disfruta el vino",
+    [ImageType.MOMENTO_SOCIAL]: "Grupo de personas celebrando o compartiendo",
+    [ImageType.PAISAJE_TERROIR]: "El vino integrado en el viñedo, la bodega o el entorno natural de origen"
+  };
+
   const renderStep1 = () => (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
-      <div className="space-y-3">
-        <label className="text-sm font-bold text-stone-800 uppercase tracking-wide">Producto Actual</label>
-        <div className="flex items-center gap-4 bg-white p-4 rounded-2xl border border-stone-100 shadow-sm">
-          <img src={selectedWine.image} alt={selectedWine.name} className="w-16 h-16 object-contain bg-stone-50 rounded-lg p-1" />
-          <div>
-            <h4 className="font-bold text-black">{selectedWine.name}</h4>
-            <p className="text-xs text-stone-400 line-clamp-1">{selectedWine.description}</p>
-          </div>
-        </div>
-      </div>
       <div className="space-y-4">
-        <h2 className="text-2xl font-bold text-black font-serif">Tipo de Escena</h2>
-        <p className="text-stone-500 font-medium text-sm">Elige el tipo de escena que quieres crear</p>
+        <label className="text-xs font-black text-stone-400 uppercase tracking-widest">
+          {wines.length > 1 && !initialData ? 'Selecciona el producto para esta sesión' : 'Producto Seleccionado'}
+        </label>
+        
+        {wines.length > 1 && !initialData ? (
+          <div className="grid grid-cols-1 gap-3 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar">
+            {wines.map(w => (
+              <button 
+                key={w.id} 
+                onClick={() => setSelectedWine(w)}
+                className={`flex items-center gap-4 p-5 rounded-[2rem] border-2 transition-all text-left group relative ${selectedWine.id === w.id ? 'border-black bg-stone-50 shadow-md' : 'border-stone-100 bg-white hover:border-stone-300'}`}
+              >
+                <div className="relative w-16 h-16 bg-stone-50 rounded-2xl p-1 flex-shrink-0 overflow-hidden border border-stone-100">
+                  <img src={w.image} alt={w.name} className="w-full h-full object-contain" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-black truncate text-lg">{w.name}</h4>
+                  <p className="text-xs text-stone-400 truncate font-medium">
+                    {w.wineType} {w.denomination ? `· ${w.denomination}` : ''}
+                  </p>
+                  <div className="flex gap-1.5 mt-2">
+                    {w.extractedPalette?.slice(0, 5).map((c, i) => (
+                      <div key={i} className="w-3.5 h-3.5 rounded-full border border-stone-200 shadow-sm" style={{ backgroundColor: c }} />
+                    ))}
+                  </div>
+                </div>
+                {selectedWine.id === w.id && (
+                  <div className="bg-black text-white p-1.5 rounded-full shadow-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex items-center gap-5 bg-white p-6 rounded-[2.5rem] border-2 border-stone-100 shadow-sm">
+            <div className="w-20 h-20 bg-stone-50 rounded-2xl p-1 flex-shrink-0 border border-stone-100">
+              <img src={selectedWine.image} alt={selectedWine.name} className="w-full h-full object-contain" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h4 className="font-bold text-black text-xl">{selectedWine.name}</h4>
+              <p className="text-sm text-stone-400 font-medium">{selectedWine.wineType} {selectedWine.denomination ? `· ${selectedWine.denomination}` : ''}</p>
+              <p className="text-xs text-stone-400 line-clamp-1 mt-1 italic">"{selectedWine.description}"</p>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="space-y-5 pt-6 border-t border-stone-100">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-bold text-black font-serif">Tipo de Escena</h2>
+          <p className="text-stone-500 font-medium text-sm">Define el propósito visual de esta sesión</p>
+        </div>
         <div className="grid gap-3">
           {Object.values(ImageType).map(t => (
-            <button key={t} onClick={() => setType(t)} className="w-full py-6 rounded-2xl border-2 border-stone-100 bg-white text-stone-900 font-bold text-left px-8 hover:border-black transition-all shadow-sm active:bg-stone-50 flex justify-between items-center group">
-              {t}
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="opacity-0 group-hover:opacity-100 transition-opacity"><path d="m9 18 6-6-6-6"/></svg>
+            <button 
+              key={t} 
+              onClick={() => setType(t)} 
+              className={`w-full py-6 rounded-3xl border-2 font-bold text-left px-8 transition-all shadow-sm flex justify-between items-center group ${state.type === t ? 'bg-black text-white border-black shadow-xl shadow-black/10' : 'bg-white text-stone-900 border-stone-100 hover:border-black'}`}
+            >
+              <div className="flex flex-col gap-1">
+                <span className="text-lg">{t}</span>
+                <span className={`text-xs font-medium ${state.type === t ? 'text-stone-400' : 'text-stone-400'}`}>{SCENE_DESCRIPTIONS[t]}</span>
+              </div>
+              <div className={`p-2 rounded-full transition-all ${state.type === t ? 'bg-white/20' : 'bg-stone-50 group-hover:bg-black group-hover:text-white'}`}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              </div>
             </button>
           ))}
         </div>
       </div>
+      <button onClick={nextStep} className={btnPrimary}>Continuar</button>
     </div>
   );
+
+  const PAISAJE_TIME_CATEGORIES = {
+    "Estaciones": ["Primavera", "Verano", "Otoño", "Invierno"]
+  };
 
   const renderStep2 = () => {
     const questions: Record<ImageType, any[]> = {
@@ -287,6 +646,7 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
       ],
       [ImageType.EN_USO]: [
         { label: "Tipo de presencia", key: "mano", options: ["Mano sola", "Persona parcial", "Persona completa"] },
+        { label: "Rango de edad", key: "rango_edad", options: ["Jóvenes (20-35)", "Adultos (35-50)", "Senior (50+)", "Mixto"] },
         { 
           label: "Valor de plano", 
           key: "valor_plano", 
@@ -304,28 +664,64 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
             ? ["Sostener", "Servir", "Brindar", "Beber", "Descorchar", "Girar la copa", "Oler"] 
             : ["Sostener", "Servir", "Brindar", "Beber", "Más opciones"] 
         },
-        { label: "¿Qué nivel de protagonismo humano quieres en la escena?", key: "protagonismo", options: ["Baja", "Moderada", "Alta"] }
+        { label: "¿Qué nivel de protagonismo humano quieres en la escena?", key: "protagonismo", options: ["Baja", "Moderada", "Alta"] },
+        { label: "Maridaje", key: "maridaje_toggle", options: ["Con maridaje", "Sin maridaje"] },
+        { 
+          label: "Categoría de Maridaje", 
+          key: "maridaje_cat", 
+          options: () => Object.keys(PAIRING_OPTIONS[selectedWine.wineType || 'Tinto'] || {}) 
+        },
+        { 
+          label: "Tipo de Maridaje", 
+          key: "maridaje_sub", 
+          options: (selections: any) => Object.keys(PAIRING_OPTIONS[selectedWine.wineType || 'Tinto']?.[selections['maridaje_cat']] || {})
+        },
+        { 
+          label: "Plato específico", 
+          key: "maridaje_item", 
+          options: (selections: any) => PAIRING_OPTIONS[selectedWine.wineType || 'Tinto']?.[selections['maridaje_cat']]?.[selections['maridaje_sub']] || []
+        }
       ],
       [ImageType.MOMENTO_SOCIAL]: [
-        { label: "Personas", key: "personas", options: ["2 personas", "3 personas", "Grupo"] },
+        { label: "Número de personas", key: "personas", options: ["Pareja", "Grupo pequeño (3-4 personas)", "Grupo grande"] },
+        { label: "Rango de edad", key: "rango_edad", options: ["Jóvenes (20-35)", "Adultos (35-50)", "Senior (50+)", "Mixto"] },
         { 
-          label: "Situación", 
+          label: "Situación / Estado de ánimo", 
           key: "situacion", 
-          options: (selections: any) => {
-            const base = ["Celebración", "Encuentro informal", "Reunión social", "Afterwork", "Cena especial"];
-            if (selections['personas'] === "2 personas") {
-              return ["Íntima", ...base];
-            }
-            return base;
-          }
+          options: ["Íntima y sofisticada", "Animada e informal", "Elegante y formal", "Relajada y tranquila"]
         },
-        { label: "Foco principal", key: "foco", options: ["El vino", "La escena"] }
+        { label: "Foco principal", key: "foco", options: ["El vino", "La escena"] },
+        { label: "Maridaje", key: "maridaje_toggle", options: ["Con maridaje", "Sin maridaje"] },
+        { 
+          label: "Categoría de Maridaje", 
+          key: "maridaje_cat", 
+          options: () => Object.keys(PAIRING_OPTIONS[selectedWine.wineType || 'Tinto'] || {}) 
+        },
+        { 
+          label: "Tipo de Maridaje", 
+          key: "maridaje_sub", 
+          options: (selections: any) => Object.keys(PAIRING_OPTIONS[selectedWine.wineType || 'Tinto']?.[selections['maridaje_cat']] || {})
+        },
+        { 
+          label: "Plato específico", 
+          key: "maridaje_item", 
+          options: (selections: any) => PAIRING_OPTIONS[selectedWine.wineType || 'Tinto']?.[selections['maridaje_cat']]?.[selections['maridaje_sub']] || []
+        }
+      ],
+      [ImageType.PAISAJE_TERROIR]: [
+        { label: "TIPO DE ENTORNO", key: "entorno", options: ["Viñedo", "Bodega", "Paisaje natural", "Zona vinícola"] },
+        { label: "¿CUÁNDO OCURRE?", key: "timeContext", type: "date-selector" },
+        { label: "MOMENTO DEL DÍA", key: "iluminacion_paisaje", options: ["Amanecer", "Mañana", "Mediodía", "Atardecer", "Noche"] },
+        { label: "FOCO PRINCIPAL", key: "foco_paisaje", options: ["Botella protagonista", "Paisaje protagonista", "Equilibrado"] },
+        { label: "IMAGEN DE REFERENCIA", key: "locationImage", type: "image-upload" }
       ]
     };
 
     const activeQuestions = questions[state.type!].filter(q => {
       const selections = state.selections;
       
+      if (state.type === ImageType.PAISAJE_TERROIR) return true;
+
       if (state.type === ImageType.BODEGON) {
         const superficie = selections['superficie'];
         const limpieza = selections['limpieza'];
@@ -352,12 +748,23 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
         const mano = selections['mano'];
         if (q.key === 'mano') return true;
         if (!mano) return false;
+        if (q.key === 'rango_edad' && mano === 'Mano sola') return false;
+        if (q.key === 'maridaje_toggle') return !!selections['protagonismo'];
+        
+        if (q.key === 'maridaje_cat') return selections['maridaje_toggle'] === 'Con maridaje';
+        if (q.key === 'maridaje_sub') return !!selections['maridaje_cat'];
+        if (q.key === 'maridaje_item') return !!selections['maridaje_sub'];
         return true;
       }
 
       if (state.type === ImageType.MOMENTO_SOCIAL) {
         if (q.key === 'personas') return true;
         if (!selections['personas']) return false;
+        if (q.key === 'maridaje_toggle') return !!selections['foco'];
+        
+        if (q.key === 'maridaje_cat') return selections['maridaje_toggle'] === 'Con maridaje';
+        if (q.key === 'maridaje_sub') return !!selections['maridaje_cat'];
+        if (q.key === 'maridaje_item') return !!selections['maridaje_sub'];
         return true;
       }
 
@@ -381,8 +788,9 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
 
     const getHeader = () => {
       if (state.type === ImageType.BODEGON) return "Dirección de Arte: Bodegón";
-      if (state.type === ImageType.EN_USO) return "Dirección de Arte: En uso";
-      if (state.type === ImageType.MOMENTO_SOCIAL) return "Dirección de Arte: Momento social";
+      if (state.type === ImageType.EN_USO) return "¿Quién está en la escena?";
+      if (state.type === ImageType.MOMENTO_SOCIAL) return "¿Quién está en la escena?";
+      if (state.type === ImageType.PAISAJE_TERROIR) return "Dirección de Arte: Paisaje & Terroir";
       return `Dirección de Arte: ${state.type}`;
     };
 
@@ -393,26 +801,125 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
           {activeQuestions.map(q => (
             <div key={q.key} className="space-y-3">
               <label className="text-xs font-black text-stone-400 uppercase tracking-widest">{q.label}</label>
-              <div className="grid grid-cols-2 gap-3">
-                {getOptions(q).map((opt: string) => (
-                  <button 
-                    key={opt} 
-                    onClick={() => handleSelection(q.key, opt)} 
-                    className={`relative py-4 rounded-xl border-2 font-bold transition-all ${state.selections[q.key] === opt ? 'bg-black text-white border-black' : 'bg-white text-stone-900 border-stone-100 hover:border-stone-300'}`}
-                  >
-                    {opt}
-                    {isOptionSuggested(q.key, opt) && (
-                      <span className="absolute -top-2 -right-1 bg-stone-100 text-stone-500 text-[8px] px-1.5 py-0.5 rounded-full border border-stone-200 uppercase tracking-tighter">Sugerido</span>
-                    )}
+              
+              {q.type === 'date-selector' ? (
+                <div className="space-y-4">
+                  {state.type === ImageType.PAISAJE_TERROIR ? (
+                    <div className="space-y-6">
+                      {Object.entries(PAISAJE_TIME_CATEGORIES).map(([category, options]) => (
+                        <div key={category} className="space-y-3">
+                          <label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">{category}</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {options.map(t => (
+                              <button 
+                                key={t} 
+                                onClick={() => handleTimeContextChange(t)} 
+                                className={`py-3 rounded-xl border-2 font-bold text-sm transition-all ${state.timeContext === t ? 'bg-black text-white border-black' : 'bg-white text-stone-900 border-stone-100 hover:border-stone-300'}`}
+                              >
+                                {t}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                      <div className="space-y-3 pt-2">
+                        <label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">¿Hay algo especial en este momento?</label>
+                        <input 
+                          type="text" 
+                          value={state.timeContext} 
+                          onChange={(e) => handleTimeContextChange(e.target.value)} 
+                          className="w-full px-4 py-3 rounded-xl border-2 border-stone-100 outline-none focus:border-black transition-all font-medium text-sm" 
+                          placeholder="Ej: vendimia, primeras lluvias, amanecer con niebla..." 
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {Object.entries(GENERAL_TIME_CATEGORIES).map(([category, options]) => (
+                        <div key={category} className="space-y-3">
+                          <label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">{category}</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {options.map(t => (
+                              <button 
+                                key={t} 
+                                onClick={() => handleTimeContextChange(t)} 
+                                className={`py-3 rounded-xl border-2 font-bold text-sm transition-all ${state.timeContext === t ? 'bg-black text-white border-black' : 'bg-white text-stone-900 border-stone-100 hover:border-stone-300'}`}
+                              >
+                                {t}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+
+                      <div className="space-y-3 pt-2">
+                        <label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">¿Hay una ocasión especial?</label>
+                        <input 
+                          type="text" 
+                          value={state.timeContext} 
+                          onChange={(e) => handleTimeContextChange(e.target.value)} 
+                          className="w-full px-4 py-3 rounded-xl border-2 border-stone-100 outline-none focus:border-black transition-all font-medium text-sm" 
+                          placeholder="Ej: Navidad, San Valentín, cumpleaños, semana de esquí..." 
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : q.type === 'image-upload' ? (
+                <div className="flex flex-col gap-3">
+                  {state.locationImage && (
+                    <div className="relative w-full h-32 rounded-xl overflow-hidden border border-stone-200">
+                      <img src={state.locationImage} alt="Referencia" className="w-full h-full object-cover" />
+                      <button onClick={() => setState(prev => ({ ...prev, locationImage: undefined }))} className="absolute top-2 right-2 p-1 bg-black/50 text-white rounded-full">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                      </button>
+                    </div>
+                  )}
+                  <input type="file" accept="image/*" ref={locationFileRef} onChange={handleLocationImageChange} className="hidden" />
+                  <button type="button" onClick={() => locationFileRef.current?.click()} className="w-full py-4 border-2 border-dashed border-stone-200 rounded-xl text-stone-500 font-bold text-sm hover:border-black transition-all bg-white">
+                    {state.locationImage ? "Cambiar foto de referencia" : "Subir foto de tu viñedo o bodega"}
                   </button>
-                ))}
-              </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  {getOptions(q).map((opt: string) => {
+                    const isSelected = q.key === 'maridaje_item' 
+                      ? (state.selections['maridaje_items'] || []).includes(opt)
+                      : state.selections[q.key] === opt;
+                    
+                    return (
+                      <button 
+                        key={opt} 
+                        onClick={() => handleSelection(q.key, opt)} 
+                        className={`relative py-4 rounded-xl border-2 font-bold transition-all ${isSelected ? 'bg-black text-white border-black' : 'bg-white text-stone-900 border-stone-100 hover:border-stone-300'}`}
+                      >
+                        {opt}
+                        {isOptionSuggested(q.key, opt) && (
+                          <span className="absolute -top-2 -right-1 bg-stone-100 text-stone-500 text-[8px] px-1.5 py-0.5 rounded-full border border-stone-200 uppercase tracking-tighter">Sugerido</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {q.key === 'maridaje_item' && (
+                <div className="space-y-3 pt-4 border-t border-stone-100 animate-in fade-in slide-in-from-top-2">
+                  <label className="text-xs font-black text-stone-400 uppercase tracking-widest">¿Quieres añadir algo más?</label>
+                  <input 
+                    type="text" 
+                    value={state.selections['maridaje_extra'] || ''} 
+                    onChange={(e) => handleSelection('maridaje_extra', e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border-2 border-stone-100 outline-none focus:border-black transition-all font-medium text-sm" 
+                    placeholder="Ej: percebes de Galicia, jamón de bellota 5J..." 
+                  />
+                </div>
+              )}
             </div>
           ))}
         </div>
         <button 
           onClick={nextStep} 
-          disabled={activeQuestions.some(q => !state.selections[q.key])}
           className={btnPrimary}
         >
           Continuar
@@ -425,16 +932,57 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
     <div className="space-y-8 animate-in fade-in slide-in-from-right-4">
       <h2 className="text-2xl font-bold text-black font-serif">Formato final de la imagen</h2>
       <div className="space-y-6">
-        <div className="space-y-3">
+        <div className="space-y-4">
           <label className="text-xs font-black text-stone-400 uppercase tracking-widest">¿En qué formato quieres la imagen final?</label>
-          <div className="grid grid-cols-5 gap-2">
-            {['1:1', '3:4', '4:3', '9:16', '16:9'].map(r => (
+          <div className="grid grid-cols-1 gap-3">
+            {[
+              { ratio: '1:1', desc: "Ideal para Instagram Feed y LinkedIn" },
+              { ratio: '9:16', desc: "Perfecto para Stories, Reels y TikTok" },
+              { ratio: '16:9', desc: "Recomendado para web, presentaciones y banners" },
+              { ratio: '4:5', desc: "Óptimo para Instagram Feed vertical" },
+              { ratio: '4:3 / A4', desc: "Para impresión, catálogos y punto de venta" }
+            ].map(({ ratio: r, desc }) => (
               <button 
                 key={r} 
-                onClick={() => setRatio(r as AspectRatio)} 
-                className={`py-3 rounded-lg border-2 font-black text-[10px] transition-all ${ratio === r ? 'bg-black text-white border-black' : 'bg-white text-stone-900 border-stone-100'}`}
+                onClick={() => handleRatioChange(r as AspectRatio)} 
+                className={`flex flex-col items-start p-4 rounded-xl border-2 transition-all ${ratio === r ? 'bg-black text-white border-black' : 'bg-white text-stone-900 border-stone-100 hover:border-stone-200'}`}
               >
-                {r}
+                <span className="font-black text-lg">{r}</span>
+                <span className={`text-[11px] font-medium ${ratio === r ? 'text-stone-400' : 'text-stone-500'}`}>{desc}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="flex gap-1">
+              {selectedWine.extractedPalette?.map((c, i) => (
+                <div key={i} className="w-4 h-4 rounded-full border border-white/20 shadow-sm" style={{ backgroundColor: c }} />
+              ))}
+            </div>
+            <span className="text-sm font-bold text-stone-700">Intensidad de la paleta de color</span>
+          </div>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {[
+              { id: 'Natural', label: 'Natural', desc: 'Sutil, solo en luz y atmósfera' },
+              { id: 'Expresivo', label: 'Expresivo', desc: 'En objetos, fondos y texturas' },
+              { id: 'Intenso', label: 'Intenso', desc: 'Dominante, editorial y audaz' }
+            ].map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => handleIntensityChange(opt.id as PaletteIntensity)}
+                className={`flex flex-col items-start p-4 rounded-xl border-2 transition-all text-left ${
+                  state.paletteIntensity === opt.id 
+                    ? 'bg-black text-white border-black' 
+                    : 'bg-white text-stone-900 border-stone-100 hover:border-stone-200'
+                }`}
+              >
+                <span className="font-bold text-sm">{opt.label}</span>
+                <span className={`text-[10px] leading-tight mt-1 ${state.paletteIntensity === opt.id ? 'text-stone-400' : 'text-stone-500'}`}>
+                  {opt.desc}
+                </span>
               </button>
             ))}
           </div>
@@ -480,20 +1028,38 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
             </div>
           </div>
 
-          <div className="space-y-4 pt-4 border-t border-stone-100">
+          <div className="space-y-6 pt-4 border-t border-stone-100">
             <label className="text-xs font-black text-stone-400 uppercase tracking-widest">¿Cuándo ocurre?</label>
-            <div className="grid grid-cols-2 gap-3">
-              {seasonalSuggestions.map(t => (
-                <button 
-                  key={t} 
-                  onClick={() => setState(prev => ({ ...prev, timeContext: t }))} 
-                  className={`py-4 rounded-xl border-2 font-bold transition-all ${state.timeContext === t ? 'bg-black text-white border-black' : 'bg-white text-stone-900 border-stone-100 hover:border-stone-300'}`}
-                >
-                  {t}
-                </button>
+            
+            <div className="space-y-6">
+              {Object.entries(GENERAL_TIME_CATEGORIES).map(([category, options]) => (
+                <div key={category} className="space-y-3">
+                  <label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">{category}</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {options.map(t => (
+                      <button 
+                        key={t} 
+                        onClick={() => handleTimeContextChange(t)} 
+                        className={`py-3 rounded-xl border-2 font-bold text-sm transition-all ${state.timeContext === t ? 'bg-black text-white border-black' : 'bg-white text-stone-900 border-stone-100 hover:border-stone-300'}`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
+
+              <div className="space-y-3 pt-2">
+                <label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">¿Hay una ocasión especial?</label>
+                <input 
+                  type="text" 
+                  value={state.timeContext} 
+                  onChange={(e) => handleTimeContextChange(e.target.value)} 
+                  className="w-full px-4 py-3 rounded-xl border-2 border-stone-100 outline-none focus:border-black transition-all font-medium text-sm" 
+                  placeholder="Ej: Navidad, San Valentín, cumpleaños, semana de esquí..." 
+                />
+              </div>
             </div>
-            <input type="text" value={state.timeContext} onChange={(e) => setState(prev => ({ ...prev, timeContext: e.target.value }))} className="w-full px-4 py-3 rounded-xl border-2 border-stone-100 outline-none focus:border-black transition-all font-medium text-sm" placeholder="O describe el momento en tus palabras..." />
           </div>
 
           <div className="space-y-4 pt-4 border-t border-stone-100">
@@ -534,7 +1100,7 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
 
           <div className="space-y-3 pt-4 border-t border-stone-100">
             <label className="text-xs font-black text-stone-400 uppercase tracking-widest">¿Quieres añadir algún matiz adicional?</label>
-            <textarea value={state.contextText} onChange={(e) => setState(prev => ({ ...prev, contextText: e.target.value }))} className="w-full px-5 py-4 rounded-2xl border-2 border-stone-100 bg-white text-black placeholder-stone-300 outline-none h-24 font-medium focus:border-stone-400 transition-all shadow-sm" placeholder="Describe la atmósfera o iluminación que imaginas para esta escena" />
+            <textarea value={state.contextText} onChange={(e) => handleContextTextChange(e.target.value)} className="w-full px-5 py-4 rounded-2xl border-2 border-stone-100 bg-white text-black placeholder-stone-300 outline-none h-24 font-medium focus:border-stone-400 transition-all shadow-sm" placeholder="Describe la atmósfera o iluminación que imaginas para esta escena" />
           </div>
         </div>
         <button disabled={state.isLoading} onClick={startConceptGeneration} className={btnPrimary}>
@@ -551,6 +1117,7 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
         <h2 className="text-2xl font-serif font-bold text-black">Propuestas Creativas</h2>
         <p className="text-stone-500 font-medium text-sm">Crea tres propuestas gráficas en menos de un minuto</p>
       </div>
+
       <div className="space-y-4">
         {state.concepts.map((concept, idx) => (
           <div key={idx} className={`bg-white border-2 p-6 rounded-3xl shadow-sm transition-all ${state.editingConceptIndex === idx ? 'border-black ring-2 ring-black/5' : 'border-stone-100 hover:border-black'}`}>
@@ -667,6 +1234,28 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
   };
 
   const renderCurrentStep = () => {
+    if (state.isLoading && state.step < 6) {
+      return (
+        <div className="flex flex-col items-center justify-center py-32 space-y-8 animate-in fade-in duration-300">
+          <div className="relative">
+            <div className="w-20 h-20 border-4 border-stone-100 border-t-black rounded-full animate-spin" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-10 h-10 bg-stone-50 rounded-full flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-black animate-pulse"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></svg>
+              </div>
+            </div>
+          </div>
+          <div className="text-center space-y-3">
+            <h3 className="text-2xl font-bold text-black font-serif">
+              {loadingMessage || "Estamos generando tus propuestas creativas..."}
+            </h3>
+            <p className="text-stone-400 font-medium animate-pulse italic">
+              Esto puede tardar unos segundos...
+            </p>
+          </div>
+        </div>
+      );
+    }
     switch (state.step) {
       case 1: return renderStep1();
       case 2: return renderStep2();
@@ -679,7 +1268,17 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
   };
 
   return (
-    <div className="max-w-xl mx-auto">
+    <div className="max-w-xl mx-auto relative">
+      {validationMessage && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300"
+          onClick={() => setValidationMessage(null)}
+        >
+          <div className="bg-black text-white px-8 py-6 rounded-2xl shadow-2xl max-w-[85%] text-center animate-in zoom-in-95 duration-300 border border-white/10">
+            <p className="text-base font-bold tracking-tight leading-relaxed">{validationMessage}</p>
+          </div>
+        </div>
+      )}
       {renderCurrentStep()}
     </div>
   );

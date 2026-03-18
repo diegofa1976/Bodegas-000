@@ -1,8 +1,7 @@
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 
 interface ErrorBoundaryProps {
-  /** The children to be rendered or handled by the error boundary */
   children?: ReactNode;
 }
 
@@ -10,29 +9,18 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-/**
- * ErrorBoundary component to catch rendering errors in the component tree.
- */
-// Fix: Explicitly extend React.Component and use a constructor to ensure that 'props' and 'state' are correctly typed and recognized by the TypeScript compiler.
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    // Initialize state in the constructor for better compatibility with standard class component patterns
-    this.state = {
-      hasError: false
-    };
-  }
+  public state: ErrorBoundaryState = { hasError: false };
 
-  public static getDerivedStateFromError(_: Error): ErrorBoundaryState {
+  static getDerivedStateFromError(_: Error): ErrorBoundaryState {
     return { hasError: true };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("Uncaught error:", error, errorInfo);
   }
 
-  public render(): ReactNode {
-    // Correctly accessing 'this.state' which is now explicitly defined in the constructor.
+  render(): ReactNode {
     if (this.state.hasError) {
       return (
         <div className="min-h-[60vh] flex flex-col items-center justify-center p-8 text-center space-y-6">
@@ -53,7 +41,6 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
       );
     }
 
-    // Correctly accessing 'this.props' which is inherited from the React Component class.
     return this.props.children || null;
   }
 }

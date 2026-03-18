@@ -1,0 +1,65 @@
+{
+  "entities": {
+    "Wine": {
+      "title": "Wine",
+      "description": "A wine product managed by the user.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier for the wine." },
+        "name": { "type": "string", "description": "Name of the wine." },
+        "description": { "type": "string", "description": "Description of the wine." },
+        "image": { "type": "string", "description": "Base64 encoded image of the wine." },
+        "targetAudience": { "type": "string", "description": "Target audience for the wine." },
+        "priceLevel": { "type": "string", "description": "Price level of the wine." },
+        "specialFeatures": { "type": "string", "description": "Special features or notes about the wine." },
+        "analysisResult": { "type": "string" },
+        "useAnalysisInCreative": { "type": "boolean" },
+        "denomination": { "type": "string" },
+        "wineType": { "type": "string", "enum": ["Tinto", "Blanco", "Rosado", "Espumoso/Cava"] },
+        "pricePositioning": { "type": "string" },
+        "consumptionMoments": { "type": "array", "items": { "type": "string" } },
+        "extractedPalette": { "type": "array", "items": { "type": "string" } },
+        "suggestedPairings": { 
+          "type": "array", 
+          "items": { 
+            "type": "object",
+            "properties": {
+              "category": { "type": "string" },
+              "subCategory": { "type": "string" },
+              "item": { "type": "string" }
+            }
+          }
+        },
+        "userId": { "type": "string", "description": "The UID of the owner." },
+        "grapeVariety": { "type": "string", "description": "The variety of grape used." },
+        "grapeImage": { "type": "string", "description": "Reference image of the grape variety." },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "userId"]
+    },
+    "GalleryImage": {
+      "title": "GalleryImage",
+      "description": "An image generated in the creative funnel.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "url": { "type": "string", "description": "Base64 encoded image or URL" },
+        "concept": { "type": "string" },
+        "wineName": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["id", "userId", "url", "wineName"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/wines/{wineId}": {
+      "schema": "Wine",
+      "description": "User-specific wine collection."
+    },
+    "/users/{userId}/gallery/{imageId}": {
+      "schema": "GalleryImage",
+      "description": "User's generated images gallery."
+    }
+  }
+}

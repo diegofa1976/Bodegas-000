@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidWine(data) {
+      return data.keys().hasAll(['id', 'name', 'userId']) &&
+             data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.userId == request.auth.uid &&
+             (!('generatedImages' in data) || data.generatedImages is list) &&
+             (!('grapeVariety' in data) || (data.grapeVariety is string && data.grapeVariety.size() < 100)) &&
+             (!('grapeImage' in data) || (data.grapeImage is string && data.grapeImage.size() < 2000000));
+    }
+
+    function isValidGalleryImage(data) {
+      return data.keys().hasAll(['id', 'userId', 'url', 'wineName']) &&
+             data.id is string &&
+             data.userId == request.auth.uid &&
+             data.url is string && data.url.size() > 0 &&
+             data.wineName is string &&
+             (!('wineId' in data) || data.wineId is string);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    
+    match /users/{userId}/wines/{wineId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidWine(request.resource.data);
+      allow update: if isOwner(userId) && isValidWine(request.resource.data) && 
+                      request.resource.data.userId == resource.data.userId;
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/gallery/{imageId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidGalleryImage(request.resource.data);
+      allow update: if isOwner(userId) && isValidGalleryImage(request.resource.data) &&
+                      request.resource.data.userId == resource.data.userId;
+      allow delete: if isOwner(userId);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

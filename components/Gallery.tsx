@@ -1,36 +1,43 @@
 
 import React, { useState } from 'react';
 import { GalleryImage } from '../types';
+import ConfirmModal from './ConfirmModal';
 
 interface GalleryProps {
   images: GalleryImage[];
   onBack: () => void;
   onRegenerate: (img: GalleryImage) => void;
   onAdjust: (img: GalleryImage) => void;
+  onDelete: (imageId: string) => void;
 }
 
-const Gallery: React.FC<GalleryProps> = ({ images, onBack, onRegenerate, onAdjust }) => {
+const Gallery: React.FC<GalleryProps> = ({ images, onBack, onRegenerate, onAdjust, onDelete }) => {
   const [selectedImage, setSelectedImage] = useState<GalleryImage | null>(null);
+  const [imageToDelete, setImageToDelete] = useState<string | null>(null);
 
-  const handleDownload = (img: GalleryImage) => {
-    // Check if it's mobile for specific behavior (though a.download works on modern mobile too)
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    
-    if (isMobile) {
-      // On mobile, opening in a new tab allows for native "Save Image" long-press context menu
-      const win = window.open();
-      if (win) {
-        win.document.write(`<img src="${img.url}" style="width:100%"/>`);
-        win.document.title = "Guardar imagen";
-      }
-    } else {
+  const handleDownload = async (img: GalleryImage) => {
+    const wineName = img.wineName.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    const sceneType = (img.sceneType || 'imagen').toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    const fileName = `${wineName}-${sceneType}-${img.timestamp}.png`;
+
+    try {
+      const response = await fetch(img.url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error('Error downloading image:', error);
+      // Fallback to direct download if fetch fails (e.g. CORS issues)
       const link = document.createElement('a');
       link.href = img.url;
-      const cleanConcept = img.concept
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '_')
-        .substring(0, 30);
-      link.download = `${img.wineName.toLowerCase().replace(/\s/g, '_')}_${cleanConcept}.png`;
+      link.download = fileName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -40,6 +47,21 @@ const Gallery: React.FC<GalleryProps> = ({ images, onBack, onRegenerate, onAdjus
   if (selectedImage) {
     return (
       <div className="space-y-8 animate-in zoom-in-95 duration-300 pb-20">
+        <ConfirmModal 
+          isOpen={!!imageToDelete}
+          title="Eliminar Imagen"
+          message="¿Estás seguro de que quieres eliminar esta imagen? Esta acción no se puede deshacer."
+          confirmText="Eliminar"
+          isDanger={true}
+          onConfirm={() => {
+            if (imageToDelete) {
+              onDelete(imageToDelete);
+              setImageToDelete(null);
+              setSelectedImage(null);
+            }
+          }}
+          onCancel={() => setImageToDelete(null)}
+        />
         <div className="flex items-center gap-4">
           <button 
             onClick={() => setSelectedImage(null)}
@@ -64,7 +86,7 @@ const Gallery: React.FC<GalleryProps> = ({ images, onBack, onRegenerate, onAdjus
             <p className="text-sm text-stone-900 font-medium italic mt-2 leading-relaxed">"{selectedImage.concept}"</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <button 
               onClick={() => onRegenerate(selectedImage)}
               className="flex flex-col items-center justify-center gap-2 py-4 bg-stone-100 text-stone-900 font-black rounded-xl text-xs hover:bg-stone-200 active:scale-95 transition-all"
@@ -78,6 +100,13 @@ const Gallery: React.FC<GalleryProps> = ({ images, onBack, onRegenerate, onAdjus
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3 1.912 5.813a2 2 0 0 1 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 1-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 1-1.275-1.275L3 12l5.813-1.912a2 2 0 0 1 1.275-1.275L12 3Z"/></svg>
               Ajustar
+            </button>
+            <button 
+              onClick={() => setImageToDelete(selectedImage.id)}
+              className="flex flex-col items-center justify-center gap-2 py-4 bg-red-50 text-red-600 font-black rounded-xl text-xs hover:bg-red-100 active:scale-95 transition-all"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+              Eliminar
             </button>
           </div>
 

@@ -1,41 +1,167 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { Brain } from 'lucide-react';
+import { onAuthStateChanged, User, signOut } from 'firebase/auth';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  onSnapshot, 
+  query, 
+  where,
+  updateDoc,
+  deleteDoc,
+  arrayUnion,
+  serverTimestamp
+} from 'firebase/firestore';
+import { auth, db } from './firebase';
+import { storageService } from './services/storageService';
+import { uploadImageToStorage } from './services/uploadService';
 import Layout from './components/Layout';
 import WineList from './components/WineList';
 import WineForm from './components/WineForm';
 import CreativeFunnel from './components/CreativeFunnel';
 import Gallery from './components/Gallery';
+import AuthScreen from './components/AuthScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Wine, AppScreen, GalleryImage } from './types';
 
-// Hard limits for localStorage persistence to avoid 5MB quota crashes
-const MAX_PERSISTED_GALLERY_IMAGES = 8;
-const MAX_PERSISTED_WINES = 15;
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 const App: React.FC = () => {
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [screen, setScreen] = useState<AppScreen>(AppScreen.HOME);
   const [funnelKey, setFunnelKey] = useState(0);
-  
-  // Initial state from localStorage
-  const [wines, setWines] = useState<Wine[]>(() => {
-    try {
-      const saved = localStorage.getItem('kinglab_wines_v2');
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      console.warn("Could not load wines from storage", e);
-      return [];
-    }
-  });
+  const [wines, setWines] = useState<Wine[]>(() => storageService.getWines());
+  const [gallery, setGallery] = useState<GalleryImage[]>(() => storageService.getGallery());
+  const [firestoreError, setFirestoreError] = useState<string | null>(null);
 
-  const [gallery, setGallery] = useState<GalleryImage[]>(() => {
-    try {
-      const saved = localStorage.getItem('kinglab_gallery_v3');
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      console.warn("Could not load gallery from storage", e);
-      return [];
+  useEffect(() => {
+    // Fetch Gemini API Key from server environment
+    fetch('/api/config')
+      .then(res => res.json())
+      .then(config => {
+        if (config.GEMINI_API_KEY) {
+          (window as any).GEMINI_API_KEY = config.GEMINI_API_KEY;
+          console.log('[App] Gemini API Key loaded from server');
+        }
+      })
+      .catch(err => console.error('[App] Failed to load config:', err));
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Sync wines from Firestore
+  useEffect(() => {
+    if (!user) {
+      setWines([]);
+      return;
     }
-  });
+
+    const winesPath = `users/${user.uid}/wines`;
+    const q = query(collection(db, winesPath));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedWines = snapshot.docs.map(doc => ({
+        ...doc.data(),
+        id: doc.id
+      })) as Wine[];
+      setWines(fetchedWines);
+      storageService.saveWines(fetchedWines);
+      setFirestoreError(null);
+    }, (error) => {
+      console.error('Firestore Wines Sync Error:', error);
+      setFirestoreError('Error al sincronizar los vinos. Comprueba tu conexión.');
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Sync gallery from Firestore
+  useEffect(() => {
+    if (!user) {
+      setGallery([]);
+      return;
+    }
+
+    const galleryPath = `users/${user.uid}/gallery`;
+    const q = query(collection(db, galleryPath));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedGallery = snapshot.docs.map(doc => ({
+        ...doc.data(),
+        id: doc.id
+      })) as GalleryImage[];
+      
+      // Sort by timestamp descending
+      fetchedGallery.sort((a, b) => b.timestamp - a.timestamp);
+      
+      setGallery(fetchedGallery);
+      storageService.saveGallery(fetchedGallery);
+      setFirestoreError(null);
+    }, (error) => {
+      console.error('Firestore Gallery Sync Error:', error);
+      setFirestoreError('Error al sincronizar la galería. Comprueba tu conexión.');
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   const [selectedWineForEdit, setSelectedWineForEdit] = useState<Wine | null>(null);
   const [funnelConfig, setFunnelConfig] = useState<{
@@ -45,55 +171,81 @@ const App: React.FC = () => {
     imageUrl?: string;
   } | undefined>(undefined);
 
-  // Manual persistence helper to avoid race conditions and quota errors
-  const persistWines = (currentWines: Wine[]) => {
+  const handleSaveWine = async (wine: Wine) => {
+    if (!user) return;
+
+    const winesPath = `users/${user.uid}/wines`;
+    const wineDocRef = doc(db, winesPath, wine.id);
+
     try {
-      const limited = currentWines.slice(0, MAX_PERSISTED_WINES);
-      localStorage.setItem('kinglab_wines_v2', JSON.stringify(limited));
-    } catch (e) {
-      console.error("Storage Error (Wines):", e);
+      await setDoc(wineDocRef, {
+        ...wine,
+        userId: user.uid,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      
+      setScreen(AppScreen.HOME);
+      setSelectedWineForEdit(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `${winesPath}/${wine.id}`);
     }
   };
 
-  const persistGallery = (currentGallery: GalleryImage[]) => {
+  const handleSaveToGallery = useCallback(async (img: GalleryImage) => {
+    if (!user) return;
+
+    const galleryPath = `users/${user.uid}/gallery`;
+    const imgDocRef = doc(db, galleryPath, img.id);
+
     try {
-      // We only persist the N most recent to stay under 5MB limit
-      const limited = currentGallery.slice(0, MAX_PERSISTED_GALLERY_IMAGES);
-      localStorage.setItem('kinglab_gallery_v3', JSON.stringify(limited));
-    } catch (e) {
-      console.error("Storage Error (Gallery): Quota exceeded. Only keeping most recent images.", e);
-      // If it still fails, try clearing old items or storing even fewer
-      try {
-        localStorage.setItem('kinglab_gallery_v3', JSON.stringify(currentGallery.slice(0, 3)));
-      } catch (e2) {}
+      // 1. Upload base64 to Storage
+      const storageUrl = await uploadImageToStorage(
+        user.uid, 
+        img.wineName, 
+        img.sceneType || 'imagen', 
+        img.url,
+        img.timestamp
+      );
+      
+      // 2. Save to Gallery collection with Storage URL
+      const updatedImg = {
+        ...img,
+        url: storageUrl,
+        userId: user.uid,
+        timestamp: Date.now()
+      };
+      
+      await setDoc(imgDocRef, updatedImg);
+
+      // 3. Update Wine document with the new image URL
+      if (img.wineId) {
+        const wineDocRef = doc(db, `users/${user.uid}/wines`, img.wineId);
+        await updateDoc(wineDocRef, {
+          generatedImages: arrayUnion(storageUrl)
+        });
+      }
+    } catch (error) {
+      console.error('Error in handleSaveToGallery:', error);
+      handleFirestoreError(error, OperationType.WRITE, `${galleryPath}/${img.id}`);
     }
-  };
-
-  const handleSaveWine = (wine: Wine) => {
-    const nextWines = wines.find(w => w.id === wine.id)
-      ? wines.map(w => w.id === wine.id ? wine : w)
-      : [wine, ...wines];
-    
-    setWines(nextWines);
-    persistWines(nextWines);
-    setScreen(AppScreen.HOME);
-    setSelectedWineForEdit(null);
-  };
-
-  const handleSaveToGallery = useCallback((img: GalleryImage) => {
-    setGallery(prev => {
-      const nextGallery = [img, ...prev];
-      // Fire-and-forget persistence
-      setTimeout(() => persistGallery(nextGallery), 0);
-      return nextGallery;
-    });
-  }, []);
+  }, [user]);
 
   const handleBack = () => {
     if (screen === AppScreen.FORM) setScreen(wines.length === 0 ? AppScreen.HOME : AppScreen.MANAGE);
     else setScreen(AppScreen.HOME);
     setSelectedWineForEdit(null);
     setFunnelConfig(undefined);
+  };
+
+  const handleDeleteImage = async (imageId: string) => {
+    if (!user) return;
+    const galleryPath = `users/${user.uid}/gallery`;
+    const imgDocRef = doc(db, galleryPath, imageId);
+    try {
+      await deleteDoc(imgDocRef);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `${galleryPath}/${imageId}`);
+    }
   };
 
   const startNewSession = () => {
@@ -103,7 +255,7 @@ const App: React.FC = () => {
   };
 
   const startFromGallery = (img: GalleryImage, isAdjustment: boolean) => {
-    const wine = wines.find(w => w.name === img.wineName);
+    const wine = wines.find(w => w.id === img.wineId) || wines.find(w => w.name === img.wineName);
     if (wine) {
       setFunnelConfig({ 
         wine, 
@@ -125,6 +277,18 @@ const App: React.FC = () => {
     return screen;
   };
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#fcfbf7]">
+        <div className="w-12 h-12 border-4 border-stone-200 border-t-black rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthScreen />;
+  }
+
   return (
     <ErrorBoundary>
       <Layout 
@@ -132,9 +296,24 @@ const App: React.FC = () => {
         onBack={screen !== AppScreen.HOME ? handleBack : undefined}
         onGear={() => setScreen(AppScreen.MANAGE)}
         onGallery={() => setScreen(AppScreen.GALLERY)}
+        onLogout={() => signOut(auth)}
         showGear={wines.length > 0}
         showGallery={gallery.length > 0}
       >
+        {firestoreError && (
+          <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-6 animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm text-red-700 font-medium">{firestoreError}</p>
+              </div>
+            </div>
+          </div>
+        )}
         {screen === AppScreen.HOME && (
           wines.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full py-24 text-center space-y-10 animate-in fade-in duration-700">
@@ -150,11 +329,11 @@ const App: React.FC = () => {
             <div className="space-y-12 py-10">
               <div className="bg-white p-12 rounded-[2.5rem] border-2 border-stone-100 text-center space-y-8 shadow-sm">
                 <div className="w-16 h-16 bg-stone-50 rounded-full flex items-center justify-center mx-auto text-black border border-stone-100">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                  <Brain size={32} strokeWidth={1.5} />
                 </div>
                 <div className="space-y-3">
-                  <h3 className="text-3xl font-serif font-bold">Mesa de Dirección Creativa</h3>
-                  <p className="text-stone-400 font-medium text-lg">Inicia una sesión de dirección creativa para tus vinos</p>
+                  <h3 className="text-4xl font-serif font-bold text-black tracking-tight">Mesa de Dirección Creativa</h3>
+                  <p className="text-black font-serif font-bold text-xl italic opacity-80">Inicia una sesión de dirección creativa para tus vinos</p>
                 </div>
                 <button onClick={startNewSession} className="w-full bg-black text-white px-8 py-6 rounded-3xl font-bold shadow-2xl active:scale-95 transition-all text-xl">
                   Comenzar proceso
@@ -190,7 +369,13 @@ const App: React.FC = () => {
         )}
 
         {screen === AppScreen.GALLERY && (
-          <Gallery images={gallery} onBack={() => setScreen(AppScreen.HOME)} onRegenerate={(img) => startFromGallery(img, false)} onAdjust={(img) => startFromGallery(img, true)} />
+          <Gallery 
+            images={gallery} 
+            onBack={() => setScreen(AppScreen.HOME)} 
+            onRegenerate={(img) => startFromGallery(img, false)} 
+            onAdjust={(img) => startFromGallery(img, true)}
+            onDelete={handleDeleteImage}
+          />
         )}
 
         {screen === AppScreen.MANAGE && (

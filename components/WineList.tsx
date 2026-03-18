@@ -36,9 +36,28 @@ const WineList: React.FC<WineListProps> = ({ wines, onEdit, onAdd }) => {
               />
               <div className="flex-1 min-w-0">
                 <h3 className="font-bold text-stone-900 truncate">{wine.name}</h3>
-                <div className="flex gap-1 overflow-hidden">
-                  <span className="text-[10px] bg-stone-100 px-1.5 py-0.5 rounded text-stone-600">{wine.priceLevel || 'N/A'}</span>
-                  <span className="text-[10px] bg-stone-100 px-1.5 py-0.5 rounded text-stone-600 truncate">{wine.targetAudience || 'N/A'}</span>
+                <div className="flex flex-col gap-1">
+                  <div className="flex gap-1 overflow-hidden">
+                    <span className="text-[10px] bg-stone-100 px-1.5 py-0.5 rounded text-stone-600">{wine.pricePositioning || wine.priceLevel || 'N/A'}</span>
+                    <span className="text-[10px] bg-stone-100 px-1.5 py-0.5 rounded text-stone-600 truncate">{wine.targetAudience || 'N/A'}</span>
+                    {wine.generatedImages && wine.generatedImages.length > 0 && (
+                      <span className="text-[10px] bg-emerald-50 px-1.5 py-0.5 rounded text-emerald-700 font-bold">
+                        {wine.generatedImages.length} {wine.generatedImages.length === 1 ? 'Imagen' : 'Imágenes'}
+                      </span>
+                    )}
+                  </div>
+                  {wine.extractedPalette && wine.extractedPalette.length > 0 && (
+                    <div className="flex gap-1 mt-1">
+                      {wine.extractedPalette.map((color, idx) => (
+                        <div 
+                          key={idx} 
+                          className="w-3 h-3 rounded-full border border-stone-200" 
+                          style={{ backgroundColor: color }}
+                          title={color}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
               <button
