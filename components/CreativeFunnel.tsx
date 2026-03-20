@@ -493,24 +493,16 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
   };
 
   const handleDownload = async (imgUrl: string) => {
-    const wineName = selectedWine.name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-    const sceneType = (state.type || 'imagen').toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-    const timestamp = Date.now();
-    const fileName = `${wineName}-${sceneType}-${timestamp}.png`;
-
+    if (!imgUrl) return;
+    
     try {
-      // If it's already a base64 string, we can use it directly
-      if (imgUrl.startsWith('data:')) {
-        const link = document.createElement('a');
-        link.href = imgUrl;
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
+      const wineName = selectedWine.name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      const sceneType = (state.type || 'imagen').toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      const timestamp = Date.now();
+      const fileName = `${wineName}-${sceneType}-${timestamp}.png`;
 
-      // If it's a URL (e.g. from Firebase Storage), fetch as blob to force filename
+      // Use fetch to get a blob, which handles both data URLs and regular URLs
+      // and avoids URL length limits for data URLs in href
       const response = await fetch(imgUrl);
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
@@ -521,13 +513,16 @@ const CreativeFunnel: React.FC<CreativeFunnelProps> = ({ wines, onFinish, onSave
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
+      
+      // Revoke the object URL after a short delay to ensure the browser has started the download
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
     } catch (error) {
       console.error('Error downloading image:', error);
-      // Fallback
+      // Fallback: try to open in a new window/tab or direct download
       const link = document.createElement('a');
       link.href = imgUrl;
-      link.download = fileName;
+      link.target = '_blank';
+      link.download = 'imagen-vino.png';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);

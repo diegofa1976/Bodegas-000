@@ -19,6 +19,7 @@ export interface Wine {
   generatedImages?: string[];
   grapeVariety?: string;
   grapeImage?: string; // base64 string
+  updatedAt?: any;
 }
 
 export interface GalleryImage {

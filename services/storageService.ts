@@ -11,20 +11,40 @@ const MAX_GALLERY = 100;
 export const storageService = {
   saveWines: (wines: Wine[]) => {
     try {
-      // Limit size to prevent quota issues
-      const limitedWines = wines.slice(0, MAX_WINES);
-      localStorage.setItem('kinglab_wines_cache', JSON.stringify(limitedWines));
+      // Strip large image data to prevent quota issues
+      const strippedWines = wines.map(({ image, grapeImage, ...rest }) => ({
+        ...rest,
+        image: '', // Never save image data in the cache
+        grapeImage: ''
+      }));
+      const limitedWines = strippedWines.slice(0, MAX_WINES);
+      sessionStorage.setItem('kinglab_wines_cache', JSON.stringify(limitedWines));
     } catch (error) {
-      console.warn('Failed to save wines to localStorage:', error);
+      console.warn('Failed to save wines to sessionStorage:', error);
+      // If QuotaExceededError, clear the cache and retry once
+      if (error instanceof Error && (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+        try {
+          sessionStorage.removeItem('kinglab_wines_cache');
+          const strippedWines = wines.map(({ image, grapeImage, ...rest }) => ({
+            ...rest,
+            image: '',
+            grapeImage: ''
+          }));
+          const limitedWines = strippedWines.slice(0, Math.floor(MAX_WINES / 2));
+          sessionStorage.setItem('kinglab_wines_cache', JSON.stringify(limitedWines));
+        } catch (retryError) {
+          console.error('Failed to save wines even after clearing cache:', retryError);
+        }
+      }
     }
   },
 
   getWines: (): Wine[] => {
     try {
-      const data = localStorage.getItem('kinglab_wines_cache');
+      const data = sessionStorage.getItem('kinglab_wines_cache');
       return data ? JSON.parse(data) : [];
     } catch (error) {
-      console.error('Failed to read wines from localStorage:', error);
+      console.error('Failed to read wines from sessionStorage:', error);
       return [];
     }
   },
@@ -33,9 +53,9 @@ export const storageService = {
     try {
       // Gallery items can be large due to base64 images
       const limitedGallery = gallery.slice(0, MAX_GALLERY);
-      localStorage.setItem('kinglab_gallery_cache', JSON.stringify(limitedGallery));
+      sessionStorage.setItem('kinglab_gallery_cache', JSON.stringify(limitedGallery));
     } catch (error) {
-      console.warn('Failed to save gallery to localStorage:', error);
+      console.warn('Failed to save gallery to sessionStorage:', error);
       if (gallery.length > 1) {
         storageService.saveGallery(gallery.slice(0, Math.floor(gallery.length / 2)));
       }
@@ -44,20 +64,20 @@ export const storageService = {
 
   getGallery: (): GalleryImage[] => {
     try {
-      const data = localStorage.getItem('kinglab_gallery_cache');
+      const data = sessionStorage.getItem('kinglab_gallery_cache');
       return data ? JSON.parse(data) : [];
     } catch (error) {
-      console.error('Failed to read gallery from localStorage:', error);
+      console.error('Failed to read gallery from sessionStorage:', error);
       return [];
     }
   },
 
   clear: () => {
     try {
-      localStorage.removeItem('kinglab_wines_cache');
-      localStorage.removeItem('kinglab_gallery_cache');
+      sessionStorage.removeItem('kinglab_wines_cache');
+      sessionStorage.removeItem('kinglab_gallery_cache');
     } catch (error) {
-      console.error('Failed to clear localStorage:', error);
+      console.error('Failed to clear sessionStorage:', error);
     }
   }
 };

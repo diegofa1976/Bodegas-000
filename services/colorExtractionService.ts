@@ -64,13 +64,13 @@ export const extractColorPalette = async (imageBase64: string): Promise<string[]
   };
 
   try {
-    // 1) First try with 'gemini-2.5-flash-preview-04-17'
+    // 1) Use 'gemini-3-flash-preview'
     try {
-      return await tryExtraction('gemini-2.5-flash-preview-04-17');
+      return await tryExtraction('gemini-3-flash-preview');
     } catch (error) {
-      console.warn("Primary model failed, trying fallback:", error);
-      // 2) if that fails, try with 'gemini-flash-latest'
-      return await tryExtraction('gemini-flash-latest');
+      console.error("Color extraction model failed:", error);
+      // 2) if that fails, return an empty array
+      return [];
     }
   } catch (error) {
     console.error("All color extraction models failed:", error);

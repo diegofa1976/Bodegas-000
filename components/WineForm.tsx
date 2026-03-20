@@ -42,6 +42,12 @@ const WineForm: React.FC<WineFormProps> = ({ initialWine, onSave }) => {
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [showAnalysisResult, setShowAnalysisResult] = useState(!!initialWine?.analysisResult);
 
+  // Memory Cleanup: Clear cache on load
+  useEffect(() => {
+    localStorage.removeItem('kinglab_wines_cache');
+    sessionStorage.removeItem('kinglab_wines_cache');
+  }, []);
+
   // Clear validation message after 2 seconds
   useEffect(() => {
     if (validationMessage) {

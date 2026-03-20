@@ -1,6 +1,17 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Brain } from 'lucide-react';
+
+declare global {
+  interface Window {
+    aistudio?: {
+      hasSelectedApiKey: () => Promise<boolean>;
+      openSelectKey: () => Promise<void>;
+    };
+    GEMINI_API_KEY?: string;
+  }
+}
+
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { 
   collection, 
@@ -80,6 +91,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [screen, setScreen] = useState<AppScreen>(AppScreen.HOME);
   const [funnelKey, setFunnelKey] = useState(0);
   const [wines, setWines] = useState<Wine[]>(() => storageService.getWines());
@@ -97,6 +109,19 @@ const App: React.FC = () => {
         }
       })
       .catch(err => console.error('[App] Failed to load config:', err));
+  }, []);
+
+  useEffect(() => {
+    const checkApiKey = async () => {
+      if (window.aistudio?.hasSelectedApiKey) {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        setHasApiKey(hasKey);
+      } else {
+        // Fallback or assume true if not in AI Studio environment
+        setHasApiKey(true);
+      }
+    };
+    checkApiKey();
   }, []);
 
   useEffect(() => {
@@ -277,10 +302,39 @@ const App: React.FC = () => {
     return screen;
   };
 
-  if (authLoading) {
+  const handleSelectKey = async () => {
+    if (window.aistudio?.openSelectKey) {
+      await window.aistudio.openSelectKey();
+      setHasApiKey(true); // Assume success as per race condition instructions
+    }
+  };
+
+  if (authLoading || hasApiKey === null) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#fcfbf7]">
         <div className="w-12 h-12 border-4 border-stone-200 border-t-black rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  if (!hasApiKey) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#fcfbf7] p-8 text-center space-y-8">
+        <div className="max-w-md space-y-4">
+          <h2 className="text-3xl font-serif font-bold text-black">Configuración Requerida</h2>
+          <p className="text-stone-600">
+            Para utilizar las funciones de generación de imágenes de alta calidad, es necesario seleccionar una clave de API de Google Cloud con facturación habilitada.
+          </p>
+          <div className="p-4 bg-stone-50 rounded-2xl border border-stone-100 text-sm text-stone-500">
+            Consulta la <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-black underline">documentación de facturación</a> para más detalles.
+          </div>
+        </div>
+        <button 
+          onClick={handleSelectKey}
+          className="bg-black text-white px-10 py-5 rounded-full font-bold shadow-xl active:scale-95 transition-all"
+        >
+          Seleccionar Clave de API
+        </button>
       </div>
     );
   }

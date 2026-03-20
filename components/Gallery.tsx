@@ -16,11 +16,14 @@ const Gallery: React.FC<GalleryProps> = ({ images, onBack, onRegenerate, onAdjus
   const [imageToDelete, setImageToDelete] = useState<string | null>(null);
 
   const handleDownload = async (img: GalleryImage) => {
-    const wineName = img.wineName.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-    const sceneType = (img.sceneType || 'imagen').toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-    const fileName = `${wineName}-${sceneType}-${img.timestamp}.png`;
+    if (!img || !img.url) return;
 
     try {
+      const wineName = img.wineName.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      const sceneType = (img.sceneType || 'imagen').toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      const fileName = `${wineName}-${sceneType}-${img.timestamp}.png`;
+
+      // Use fetch to get a blob, which handles both data URLs and regular URLs
       const response = await fetch(img.url);
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
@@ -31,13 +34,16 @@ const Gallery: React.FC<GalleryProps> = ({ images, onBack, onRegenerate, onAdjus
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
+      
+      // Revoke after a delay
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
     } catch (error) {
       console.error('Error downloading image:', error);
-      // Fallback to direct download if fetch fails (e.g. CORS issues)
+      // Fallback: try to open in a new window/tab or direct download
       const link = document.createElement('a');
       link.href = img.url;
-      link.download = fileName;
+      link.target = '_blank';
+      link.download = 'imagen-vino.png';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);

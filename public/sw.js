@@ -12,16 +12,8 @@ self.addEventListener('fetch', (event) => {
   
   // Intercept calls to Gemini API
   if (url.hostname === 'generativelanguage.googleapis.com') {
-    console.log('Service Worker: Intercepting Gemini API call:', url.href);
-    
     // Redirect to local proxy
-    // Original: https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=...
-    // Target: /api-proxy/models/gemini-pro:generateContent
-    
-    const targetPath = url.pathname.slice(1);
-    const proxyUrl = `/api-proxy/${targetPath}${url.search}`;
-    
-    console.log('Service Worker: Proxying to:', proxyUrl);
+    const proxyUrl = `/api-proxy${url.pathname}${url.search}`;
     
     event.respondWith((async () => {
       try {
@@ -29,16 +21,34 @@ self.addEventListener('fetch', (event) => {
           ? await event.request.clone().arrayBuffer()
           : undefined;
 
-        return await fetch(proxyUrl, {
+        // Clone headers to ensure we don't lose anything
+        const headers = new Headers();
+        for (const [key, value] of event.request.headers.entries()) {
+          headers.append(key, value);
+        }
+
+        // Use a persistent fetch to avoid termination issues
+        const response = await fetch(proxyUrl, {
           method: event.request.method,
-          headers: event.request.headers,
+          headers: headers,
           body: body,
           mode: 'same-origin',
-          credentials: 'omit'
+          credentials: 'omit',
+          // Ensure the connection stays open for long-running requests
+          keepalive: true 
         });
+
+        // If proxy returns 404 (not found) or 500 (server error), attempt direct fallback
+        if (response.status === 404 || response.status === 500) {
+          console.warn(`Service Worker: Proxy returned ${response.status}, falling back to direct call.`);
+          return fetch(event.request);
+        }
+
+        return response;
       } catch (error) {
         console.error('Service Worker: Proxy fetch failed:', error);
-        return fetch(event.request); // Fallback to original request if proxy fails
+        // Fallback to original request if proxy fails
+        return fetch(event.request);
       }
     })());
   }
