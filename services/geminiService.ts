@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Wine, ImageType, FunnelState } from "../types";
  
@@ -46,23 +45,17 @@ export const analyzePerception = async (wineName: string): Promise<string> => {
  
 /**
  * Extracts a short display title from a concept string.
- * Concepts may have format "TÍTULO: X. DESCRIPCIÓN: Y..." — we only show the title part.
  */
 export const extractConceptTitle = (concept: string): string => {
-  // Try to extract TÍTULO: ... up to the first period or DESCRIPCIÓN
   const titleMatch = concept.match(/TÍTULO:\s*([^.]+)/i);
   if (titleMatch) return titleMatch[1].trim();
- 
-  // If no TÍTULO prefix, return first sentence (up to first period)
   const firstSentence = concept.split('.')[0].trim();
   if (firstSentence.length > 0 && firstSentence.length <= 80) return firstSentence;
- 
-  // Fallback: truncate at 80 chars
   return concept.length > 80 ? concept.substring(0, 77) + '...' : concept;
 };
  
 /**
- * Reinterprets user feedback into a structured English prompt for image editing.
+ * Reinterprets user feedback into a structured prompt for image editing.
  */
 export const reinterpretEditRequest = async (userInput: string, currentConcept: string): Promise<string> => {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -71,16 +64,14 @@ export const reinterpretEditRequest = async (userInput: string, currentConcept: 
   }
   const ai = new GoogleGenAI({ apiKey });
  
-  const prompt = `
-    Eres un experto en dirección de arte y edición fotográfica publicitaria.
-    Convierte el feedback del usuario (español) en una instrucción técnica MUY ESPECÍFICA en inglés para editar una imagen existente.
+  const prompt = `Eres un experto en dirección de arte y edición fotográfica publicitaria. Convierte el feedback del usuario (español) en una instrucción técnica en inglés para un modelo de edición de imagen.
     
     FEEDBACK: "${userInput}"
     CONCEPTO ACTUAL: "${currentConcept}"
     
     REGLAS:
     1. Identifica el cambio específico (luz, fondo, objeto, etiqueta, color, etc.).
-    2. Sé muy concreto y técnico. Ejemplo: en lugar de "ilumina la botella", di "add a warm directional light source from the upper left hitting the bottle, creating a subtle highlight on the glass surface".
+    2. Sé muy concreto y técnico.
     3. Ignora cortesías o frases irrelevantes.
     4. Devuelve SOLO la descripción técnica del cambio en inglés, sin prefijos ni frases introductorias.
     
@@ -91,8 +82,23 @@ export const reinterpretEditRequest = async (userInput: string, currentConcept: 
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            concepts: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: "Instrucción técnica de edición en inglés."
+            }
+          },
+          required: ["concepts"]
+        }
+      }
     });
-    return response.text?.trim() || userInput;
+    const parsed = JSON.parse(response.text || '{"concepts":[]}');
+    return parsed.concepts?.[0]?.trim() || userInput;
   } catch (error) {
     console.error("Error reinterpreting edit request:", error);
     return userInput;
@@ -110,9 +116,7 @@ export const generateVisualConcepts = async (wine: Wine, state: FunnelState): Pr
   const ai = new GoogleGenAI({ apiKey });
   const isMuyMinimal = state.type === ImageType.BODEGON && state.selections['limpieza'] === 'Muy minimal';
  
-  const prompt = `
-    Eres un Director Creativo experto en fotografía de vinos para KingLab Bodegas.
-    Tu tarea es generar 3 conceptos visuales que reflejen la esencia de este producto específico.
+  const prompt = `Eres un Director Creativo experto en fotografía de vinos para KingLab Bodegas. Tu tarea es generar 3 conceptos visuales que reflejen la esencia de este producto específico.
     
     PRODUCTO (CONTEXTO ACTIVO - Prioriza estos valores en el estilo):
     - Nombre: ${wine.name}
@@ -199,7 +203,7 @@ export const generateFinalImage = async (
     - La imagen debe sentirse REAL, natural y creíble.
     - EVITA: Estética de "stock photography", poses artificiales, perfección excesiva.
     - MANTÉN: Alta calidad técnica, buen gusto y estilismo cuidadoso.
-    - TONO VISUAL: Realismo cinemático. La imagen debe parecer un momento real capturado de forma natural.
+    - TONO VISUAL: Realismo cinemático.
     - PRESENCIA HUMANA: Lenguaje corporal natural, posturas creíbles con asimetría sutil.
     - VESTUARIO: Prendas de alta calidad con estilismo natural "vivido", no de sesión de moda rígida.
   `;
@@ -208,45 +212,31 @@ export const generateFinalImage = async (
   let prompt: string;
  
   if (baseImage) {
-    // EDIT MODE: base image goes FIRST so Gemini treats it as the primary reference
     const baseB64 = baseImage.split(',')[1];
     const baseMime = baseImage.split(';')[0].split(':')[1];
  
     contents = [
-      // IMAGE 1: the generated image to edit (primary reference)
       { inlineData: { data: baseB64, mimeType: baseMime } },
-      // IMAGE 2: the wine bottle label reference
       { inlineData: { data: wineBase64, mimeType: wineMimeType } },
     ];
  
-    prompt = `
-      You are editing IMAGE 1 (the main scene). IMAGE 2 is only a reference for the wine bottle label — keep it legible and faithful in the result.
-      
-      EDIT INSTRUCTION: ${adjustment}
-      
-      CRITICAL EDITING RULES:
-      - IMAGE 1 is your base. Preserve its exact composition, characters, poses, framing, and overall lighting style.
-      - Do NOT generate a new image from scratch.
-      - Do NOT change anything that is not explicitly mentioned in the edit instruction above.
-      - The wine bottle label must remain legible, as shown in IMAGE 2.
-      - Apply ONLY the change described in the edit instruction.
-      
+    prompt = `INSTRUCCIONES CRÍTICAS DE EDICIÓN: - La imagen en la PARTE 2 es tu referencia base. - MANTÉN la composición exacta, la pose de los personajes, el estilo de iluminación y el encuadre de la PARTE 2. - NO generes una imagen nueva desde cero. - La etiqueta de la botella debe seguir siendo legible y fiel a la PARTE 1. - SOLO aplica el cambio solicitado en el prompt superior.
+
+      INSTRUCCIÓN DE EDICIÓN: ${adjustment}
+
       ${realismRule}
     `;
   } else {
-    // GENERATION MODE: wine bottle goes first as reference
     contents = [
       { inlineData: { data: wineBase64, mimeType: wineMimeType } },
     ];
  
-    prompt = `
-      Generate a high-quality advertising photograph based STRICTLY on this creative concept:
-      "${concept}"
+    prompt = `Genera una imagen publicitaria de alta calidad basada ESTRICTAMENTE en este concepto creativo: "${concept}"
       
-      TECHNICAL DETAILS:
-      - Product: ${wine.name}
-      - Objective: Maintain the exact shape of the bottle and label legibility from the reference image.
-      - Style: Professional high-end advertising photography with naturalism focus.
+      DETALLES TÉCNICOS:
+      - Producto: ${wine.name}
+      - Objetivo: Mantener la forma exacta de la botella y la legibilidad de la etiqueta de la imagen de referencia.
+      - Estilo: Fotografía publicitaria profesional de alta gama con enfoque en el naturalismo.
       
       ${realismRule}
     `;
@@ -255,11 +245,11 @@ export const generateFinalImage = async (
       const locBase64 = locationImage.split(',')[1];
       const locMimeType = locationImage.split(';')[0].split(':')[1];
       contents.push({ inlineData: { data: locBase64, mimeType: locMimeType } });
-      prompt += `\n\nENVIRONMENT REFERENCE: The second image is an architectural/spatial reference. Evoke this same place naturally in the background of the composition.`;
+      prompt += `\n\nREFERENCIA DE ENTORNO: La segunda imagen es una referencia arquitectónica/espacial. Evoca este mismo lugar de forma natural en el fondo de la composición.`;
     }
  
     if (adjustment) {
-      prompt += `\n\nINITIAL ADJUSTMENT: "${adjustment}".`;
+      prompt += `\n\nAJUSTE INICIAL: "${adjustment}".`;
     }
   }
  
@@ -267,7 +257,7 @@ export const generateFinalImage = async (
  
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
+      model: 'gemini-3.1-flash-image-preview',
       contents: { parts: contents },
       config: {
         imageConfig: {
